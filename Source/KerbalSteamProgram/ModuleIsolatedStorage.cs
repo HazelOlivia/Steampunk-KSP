@@ -5,7 +5,7 @@ public class ModuleIsolatedStorage : PartModule
     [KSPField]
     public string resourceToLock = "Water";
 
-    [KSPField(guiActive = true, guiActiveEditor = true, guiName = "Isolated Water")]
+    [KSPField(guiActive = false, guiActiveEditor = false, guiName = "Isolated Water")]
     public string displayLabel = "";
 
     // Track the active Part Action Window container reference
