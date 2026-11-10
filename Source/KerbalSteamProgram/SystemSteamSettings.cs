@@ -77,7 +77,7 @@ namespace KerbalSteamProgram
         // The minimum number of time steps to take in a simulation frame
         public static int MinSteps = 1;
         // The maximum number of time steps to take in a simulation frame
-        public static int MaxSteps = 30;
+        public static int MaxSteps = 128;
         // The standard timestep in the editor
         public static float SimulationRateEditor = 1f;
 

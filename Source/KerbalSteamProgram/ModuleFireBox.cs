@@ -7,14 +7,12 @@ using System.Threading.Tasks;
 using Unity;
 using UnityEngine;
 using SystemHeat;
+using DynamicBatteryStorage;
 
 namespace KerbalSteamProgram
 {
-    class FireBox : PartModule
+    public class ModuleFireBox : ModuleSystemHeat
     {
-        [KSPField(isPersistant = false)]
-        public string moduleID = "firebox";
-
         [KSPField]
         public float InjectorRate = 1.0f; // U/s
         [KSPField]
@@ -46,7 +44,7 @@ namespace KerbalSteamProgram
         private int LiquidFuelResourceID = -1;
         private int OxidizerResourceID = -1;
 
-        public ModuleSystemHeat SystemHeatModule = null;
+        //public ModuleSystemHeat SystemHeatModule = null;
 
         public override void OnStart(StartState state)
         {
@@ -75,54 +73,46 @@ namespace KerbalSteamProgram
 
         }
 
-        public void FixedUpdate()
-        {
-            if (!HighLogic.LoadedSceneIsFlight) return;
+        //public new void UpdateSimulationValues(float nominalTemp, float currentTemp, float currentNetFlux)
+        //{
+        //    base.UpdateSimulationValues(nominalTemp, currentTemp, currentNetFlux);
 
-            if (SystemHeatModule == null)
-            {
-                SystemHeatModule = this.part.FindModuleImplementing<ModuleSystemHeat>();
-                if (SystemHeatModule != null)
-                {
-                    return;
-                }
-            }
+        //    try
+        //    {
+        //        float deltatime = base.Loop.timeStep;
 
-            if (Fuel_Valve > 0f)
-            {
-                float targetUnitsPerSecond = InjectorRate * (Fuel_Valve / 100f);
-                double unitsToPullThisFrame = targetUnitsPerSecond * TimeWarp.fixedDeltaTime;
+        //        if (Fuel_Valve > 0f)
+        //        {
+        //            float targetUnitsPerSecond = InjectorRate * (Fuel_Valve / 100f);
+        //            double unitsToPullThisFrame = targetUnitsPerSecond * deltatime;
 
-                double LF_unitsActuallyDrained = this.part.RequestResource(LiquidFuelResourceID, unitsToPullThisFrame * LF_ratio);
-                double OX_unitsActuallyDrained = this.part.RequestResource(OxidizerResourceID, unitsToPullThisFrame * OX_ratio);
+        //            double LF_unitsActuallyDrained = this.part.RequestResource(LiquidFuelResourceID, unitsToPullThisFrame * LF_ratio);
+        //            double OX_unitsActuallyDrained = this.part.RequestResource(OxidizerResourceID, unitsToPullThisFrame * OX_ratio);
 
-                if (LF_unitsActuallyDrained == 0 ||
-                   OX_unitsActuallyDrained == 0)
-                {
-                    this.part.RequestResource(LiquidFuelResourceID, -LF_unitsActuallyDrained);
-                    this.part.RequestResource(OxidizerResourceID, -OX_unitsActuallyDrained);
-                }
-                else
-                {
-                    float Energy = LF_calorific_value * (float)LF_unitsActuallyDrained;
-                    ThermalEnergy += Energy;
-                    Power = Energy / TimeWarp.fixedDeltaTime;
-                }
-            }
-            else Power = 0;
+        //            if (LF_unitsActuallyDrained == 0 ||
+        //               OX_unitsActuallyDrained == 0)
+        //            {
+        //                this.part.RequestResource(LiquidFuelResourceID, -LF_unitsActuallyDrained);
+        //                this.part.RequestResource(OxidizerResourceID, -OX_unitsActuallyDrained);
+        //            }
+        //            else
+        //            {
+        //                float Energy = LF_calorific_value * (float)LF_unitsActuallyDrained;
+        //                ThermalEnergy += Energy;
+        //                Power = Energy / deltatime;
+        //            }
+        //        }
+        //        else Power = 0;
 
-            float t0_Power = Stefan_Boltzmann_Constant * (Mathf.Pow(Temperature, 4) - Mathf.Pow(SystemHeatModule.currentLoopTemperature, 4)) * HeatingSurface;
-            float delta_E = SteamLoop.delta_energy_exp_aproach(Temperature, HeatCapacity, SystemHeatModule.Loop, t0_Power, TimeWarp.fixedDeltaTime);
+        //        float t0_Power = Stefan_Boltzmann_Constant * (Mathf.Pow(Temperature, 4) - Mathf.Pow(base.currentLoopTemperature, 4)) * HeatingSurface;
+        //        float delta_E = SteamLoop.delta_energy_exp_aproach(Temperature, HeatCapacity, base.Loop, t0_Power, deltatime);
 
-            SystemHeatModule.AddFlux(moduleID, Temperature, (delta_E / TimeWarp.fixedDeltaTime), false);
-            ThermalEnergy -= delta_E;
+        //        base.AddFlux(moduleID, Temperature, (delta_E / deltatime), false);
+        //        ThermalEnergy -= delta_E;
 
-            Temperature = 2970 * (1 - Mathf.Exp(-(ThermalEnergy / HeatCapacity) / 2970));
-        }
-
-        protected void Update()
-        {
-
-        }
+        //        Temperature = 2970f * (1 - Mathf.Exp(-(ThermalEnergy / HeatCapacity) / 2970f));
+        //    }
+        //    catch { }
+        //}
     }
 }

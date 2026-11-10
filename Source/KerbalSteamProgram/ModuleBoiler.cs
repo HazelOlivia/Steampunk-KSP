@@ -7,24 +7,23 @@ using System.Threading.Tasks;
 using Unity;
 using UnityEngine;
 using SystemHeat;
+using DynamicBatteryStorage;
 
 namespace KerbalSteamProgram
 {
-    public class ModuleBoiler : PartModule
+    public class ModuleBoiler : ModuleSystemHeat
     {
         [KSPField]
         public float InjectorRate = 1.0f; //U/s
         [KSPField]
         public float ThermalConductance = 1.0f; //kW/K
 
-        [KSPField(isPersistant = false)]
-        public string moduleID = "boiler";
-
-        ModuleBoiler parent_Boiler = null;
+        [KSPField]
+        public ModuleBoiler parent_Boiler = null;
 
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = true, guiName = "Throttle", guiUnits = "%", groupName = "sysBoilerinfo", groupDisplayName = "#LOC_SystemSteam_ModuleSystemBoiler_GroupName")]
         [UI_FloatRange(minValue = 0f, maxValue = 100f, stepIncrement = 1f)]
-        public float Steam_Valve = 0f;
+        public float Throttle = 0f;
 
         [KSPField(isPersistant = true, guiActive = true, guiActiveEditor = true, guiName = "Injector", guiUnits = "%", groupName = "sysBoilerinfo")]
         [UI_FloatRange(minValue = 0f, maxValue = 100f, stepIncrement = 1f)]
@@ -36,15 +35,15 @@ namespace KerbalSteamProgram
         [KSPField(isPersistant = false, guiActive = false, guiActiveEditor = false, guiName = " ", groupName = "sysBoilerinfo", groupDisplayName = "#LOC_SystemSteam_ModuleSystemBoiler_GroupName")]
         public string parent_Boiler_connected_text = "paired with parentBoiler";
 
-        //[KSPField(isPersistant = false, guiActive = true, guiActiveEditor = false, guiName = "ThermalEnergy", guiUnits = "kJ", groupName = "sysBoilerinfo")]
-        public float ThermalEnergy = 0f; //kJ
+        [KSPField(isPersistant = false, guiActive = true, guiActiveEditor = false, guiName = "ThermalEnergy", guiUnits = "kJ", groupName = "sysBoilerinfo")]
+        public float ThermalEnergy_Boiler = 1000f; //kJ
 
         //[KSPField(isPersistant = false, guiActive = true, guiActiveEditor = false, guiName = "Pressure", guiUnits = "kPa")]
         //[UI_ProgressBar(minValue = 0f, maxValue = 1500f)]
         //public float Pressure = 101f;
 
         [KSPField]
-        public float Temperature = 288f; //Kelvin
+        public float Temperature_Boiler = 288f; //Kelvin
 
         [KSPField(isPersistant = false, guiActive = true, guiActiveEditor = false, guiName = "Temperature", groupName = "sysBoilerinfo")]
         public string Temperature_text = "0.0 K";
@@ -57,10 +56,9 @@ namespace KerbalSteamProgram
         private int waterResourceID = -1;
         protected float radiativeFlux; //kW
         const float Convertion_energy = 2260; // kJ/kg  2260 kJ/kg
-        const float Gass_Constant = 461.5f; // kJ/tonne*K   0.4615 kJ/kg*K
 
-        public ModuleSystemHeat SystemHeatModule = null;
-        public ModuleSteamReservoar SteamReservoarModule = null;
+        //public ModuleSystemHeat SystemHeatModule = null;
+        public ModuleSteamReservoir SteamReservoirModule = null;
 
         public override void OnStart(StartState state)
         {
@@ -68,11 +66,57 @@ namespace KerbalSteamProgram
 
             GameEvents.onPartActionUICreate.Add(OnPartActionUICreate);
 
-            parent_Boiler = this.part.parent.FindModuleImplementing<ModuleBoiler>();
+            if (this.part.parent != null)
+            {
+                parent_Boiler = this.part.parent.FindModuleImplementing<ModuleBoiler>();
+                if(parent_Boiler != null)
+                {
+                    while (true)
+                    {
+                        if (parent_Boiler.part.parent == null) break;
+                        ModuleBoiler potential_parent_Boiler = parent_Boiler.part.parent.FindModuleImplementing<ModuleBoiler>();
+                        if (potential_parent_Boiler != null) parent_Boiler = potential_parent_Boiler;
+                        else break;
+                    }
+                }
+            }
+
+            SteamReservoirModule = this.part.FindModuleImplementing<ModuleSteamReservoir>();
+            if (SteamReservoirModule != null)
+            {
+                PartResource internalWater = this.part.Resources[Water];
+                float volume = (float)internalWater.maxAmount; // Liters
+                float V_Water = (float)internalWater.amount; // Liters
+                float V_Steam = volume - V_Water;
+                SteamReservoirModule.volume = V_Steam;
+            }
+
+            if (HighLogic.LoadedSceneIsFlight)
+            {
+                // Start the waiting process without blocking the game
+                StartCoroutine(WaitForAtmosphere());
+            }
+        }
+        private System.Collections.IEnumerator WaitForAtmosphere()
+        {
+            if (FlightGlobals.ready && vessel != null && vessel.loaded)
+            {
+                for (int i = 0; i < 30; i++)
+                {
+                    if (part.staticPressureAtm > 0)
+                    {
+                        break;
+                    }
+
+                    yield return null; // Wait for the next frame
+                }
+            }
+            InitializeModule();
+        }
+        private void InitializeModule()
+        {
 
             waterResourceID = PartResourceLibrary.Instance.GetDefinition(Water).id;
-
-            this.part.FindModuleImplementing<ModuleSystemHeat>();
 
             PartResource internalWater = this.part.Resources[Water];
             PartResource internalSteam = this.part.Resources["Steam"];
@@ -81,22 +125,18 @@ namespace KerbalSteamProgram
             float massWaterTonnes = (float)internalWater.amount * 0.001f;
             float massSteamTonnes = (float)internalSteam.amount * 0.001f;
 
-            Temperature = UndoSaturationVaporPressureCurve(101.325f);
+            Temperature_Boiler = 288f;
 
-            /// <summary>
-            /// Derived from:
-            /// float volume = (float)internalWater.maxAmount * 0.001f; // m^3 = Unit * m^3/Liter
-            /// float V_Water = (float)internalWater.amount * 0.001f; // m^3 = Unit * m^3/Liter
-            /// float V_Steam = Mathf.Max(volume - V_Water, 0.01f);
-            /// Temperature = ThermalEnergy / (steamDef.specificHeatCapacity * massSteamTonnes);
-            /// Pressure = ((float)internalSteam.amount * Gass_Constant * Temperature) / (V_Steam);
-            /// </summary>
-            float initial_steam = (float)((internalSteam.amount * Gass_Constant * Temperature * 1000) - 101.325f * (internalWater.maxAmount - internalWater.amount)) / (101.325f - Gass_Constant * Temperature * 1000);
+            float volume = (float)internalWater.maxAmount; // Liters
+            float V_Water = (float)internalWater.amount; // Liters
+            float V_Steam = volume - V_Water;
+            base.volume = V_Steam;
 
-            internalWater.amount -= initial_steam;
-            internalSteam.amount += initial_steam;
+            SteamReservoirModule.Mass_Air = ((float)part.staticPressureAtm * 101.325f) * V_Steam / (ModuleSteamReservoir.Gas_Constant_Air * Temperature_Boiler);
+            float massAirTonnes = SteamReservoirModule.Mass_Air * 0.001f;
 
-            ThermalEnergy = Temperature * (waterDef.specificHeatCapacity * massWaterTonnes + steamDef.specificHeatCapacity * massSteamTonnes);
+            ThermalEnergy_Boiler = Temperature_Boiler * (waterDef.specificHeatCapacity * massWaterTonnes + steamDef.specificHeatCapacity * massSteamTonnes + ModuleSteamReservoir.specificHeatCapacity_Air * massAirTonnes);
+
         }
 
         private void OnDestroy()
@@ -113,7 +153,7 @@ namespace KerbalSteamProgram
             UIPartActionWindow paw = UIPartActionController.Instance.GetItem(p);
             if (paw == null) return;
 
-            string[] fields_in_dep = { /*"Injector", "Steam_Valve" */     }; //independant
+            string[] fields_in_dep = { "Injector", "Steam_Valve"      }; //independant
             string[] fields_co_dep = { "parent_Boiler_connected_text" }; //codependant
             if (parent_Boiler == null)
             {
@@ -148,173 +188,137 @@ namespace KerbalSteamProgram
         }
         public void AddFlux(float Flux)
         {
-            ThermalEnergy += Flux;
+            ThermalEnergy_Boiler += Flux;
         }
 
-        public void FixedUpdate()
+        //public new void UpdateSimulationValues(float nominalTemp, float currentTemp, float currentNetFlux)
+        //{
+        //    base.UpdateSimulationValues(nominalTemp, currentTemp, currentNetFlux);
+
+        //    try
+        //    {
+        //        float deltatime = base.Loop.timeStep;
+
+        //        if (SteamReservoirModule == null) SteamReservoirModule = this.part.FindModuleImplementing<ModuleSteamReservoir>();
+
+        //        PartResource internalWater = this.part.Resources[Water];
+        //        PartResource internalSteam = this.part.Resources["Steam"];
+
+        //        PartResourceDefinition waterDef = internalWater.info;
+        //        PartResourceDefinition steamDef = internalSteam.info;
+
+        //        if (parent_Boiler != null)
+        //        {
+        //            PartResource parent_internalWater = parent_Boiler.part.Resources[Water];
+        //            PartResource parent_internalSteam = parent_Boiler.part.Resources["Steam"];
+
+        //            Throttle = parent_Boiler.Throttle;
+        //            Injector = parent_Boiler.Injector;
+
+        //            double volume_AB = internalWater.maxAmount + parent_internalWater.maxAmount;
+        //            double volume_rA = internalWater.maxAmount / volume_AB;
+        //            double volume_rB = parent_internalWater.maxAmount / volume_AB;
+
+        //            double water_AB = internalWater.amount + parent_internalWater.amount;
+        //            internalWater.amount = water_AB * volume_rA;
+        //            parent_internalWater.amount = water_AB * volume_rB;
+
+        //            double steam_AB = internalSteam.amount + parent_internalSteam.amount;
+        //            internalSteam.amount = steam_AB * volume_rA;
+        //            parent_internalSteam.amount = steam_AB * volume_rB;
+
+        //            double air_AB = SteamReservoirModule.Mass_Air + parent_Boiler.SteamReservoirModule.Mass_Air;
+        //            SteamReservoirModule.Mass_Air = (float)(air_AB * volume_rA);
+        //            parent_Boiler.SteamReservoirModule.Mass_Air = (float)(air_AB * volume_rB);
+
+        //            double energy_AB = ThermalEnergy_Boiler + parent_Boiler.ThermalEnergy_Boiler;
+        //            ThermalEnergy_Boiler = (float)(energy_AB * volume_rA);
+        //            parent_Boiler.ThermalEnergy_Boiler = (float)(energy_AB * volume_rB);
+        //        }
+
+
+        //        if (Injector > 0f)
+        //        {
+        //            float targetUnitsPerSecond = InjectorRate * (Injector / 100f);
+        //            double unitsToPullThisFrame = targetUnitsPerSecond * deltatime;
+        //            if (internalWater.amount + unitsToPullThisFrame >= internalWater.maxAmount)
+        //            {
+        //                unitsToPullThisFrame = internalWater.maxAmount - internalWater.amount;
+        //            }
+
+        //            double unitsActuallyDrained = this.part.RequestResource(waterResourceID, unitsToPullThisFrame);
+        //            flowRateLabel = $"{unitsActuallyDrained / deltatime:F2} U/s";
+
+        //            if (this.part.Resources.Contains(Water))
+        //            {
+        //                internalWater.amount += unitsActuallyDrained;
+        //                ThermalEnergy_Boiler += (float)unitsActuallyDrained * 0.001f * waterDef.specificHeatCapacity * 300f;// kJ = kg * tonne/kg * kJ/tonne*K * K
+        //            }
+        //        }
+        //        else
+        //        {
+        //            flowRateLabel = $"{0.0f:F2} U/s";
+        //        }
+        //        Water_Level = Mathf.Round((float)(internalWater.amount / internalWater.maxAmount) * 100f);
+
+        //        float massWaterTonnes = (float)internalWater.amount * 0.001f; //tonne = kg * tonne/kg
+        //        float massSteamTonnes = (float)internalSteam.amount * 0.001f;
+        //        float massAirTonnes = SteamReservoirModule.Mass_Air * 0.001f;
+        //        float HeatCapacity = (waterDef.specificHeatCapacity * massWaterTonnes + steamDef.specificHeatCapacity * massSteamTonnes + ModuleSteamReservoir.specificHeatCapacity_Air * massAirTonnes);
+        //        if (HeatCapacity < 0.000001f) HeatCapacity = 0.000001f;
+
+        //        radiativeFlux = ThermalConductance * (Temperature_Boiler - base.currentLoopTemperature);
+        //        float delta_E = SteamLoop.delta_energy_exp_aproach(Temperature_Boiler, HeatCapacity, base.Loop, radiativeFlux, deltatime);
+        //        base.AddFlux(moduleID, Temperature_Boiler, (delta_E / deltatime), false);
+        //        ThermalEnergy_Boiler -= delta_E;
+
+        //        Temperature_Boiler = ThermalEnergy_Boiler / HeatCapacity;
+        //        Temperature_text = $"{Temperature_Boiler:F1} K / {(Temperature_Boiler - 273.15f):F0} °C";
+
+        //        float volume_max = (float)internalWater.maxAmount * 0.001f; // m^3 = Unit * m^3/Liter
+        //        float V_Water = (float)internalWater.amount * 0.001f; // m^3 = Unit * m^3/Liter
+        //        float V_Steam = Mathf.Max(volume_max - V_Water, 0.01f); // m^3
+
+        //        /// define steam and volume in ModuleSteamReservoir
+        //        SteamReservoirModule.volume = V_Steam * 1000;
+        //        SteamReservoirModule.ThermalEnergy = Temperature_Boiler * (steamDef.specificHeatCapacity * massSteamTonnes + ModuleSteamReservoir.specificHeatCapacity_Air * massAirTonnes);
+
+        //        float Pressure_Steam_Ideal = SaturationVaporPressureCurve(Temperature_Boiler);
+
+        //        float Mass_Steam_Ideal = (Pressure_Steam_Ideal * V_Steam) / (ModuleSteamReservoir.Gas_Constant_Steam * Temperature_Boiler); // PV=mRT --> m=PV/RT   kPa * m^3 = tonne * kJ/tonne*K * K
+        //        float Units_Steam_Ideal = Mass_Steam_Ideal * 1000f; // Unit = tonn * kg/tonne
+
+        //        float delta_units = (Units_Steam_Ideal - (float)internalSteam.amount) /* (1 - Mathf.Pow(1.5f, -deltatime))*/;
+
+        //        delta_units = Mathf.Clamp(delta_units, -(float)internalSteam.amount, Mathf.Min((float)internalWater.amount, (ThermalEnergy_Boiler / Convertion_energy)));
+
+        //        ThermalEnergy_Boiler -= Convertion_energy * delta_units;
+        //        internalWater.amount -= delta_units;
+        //        internalSteam.amount += delta_units;
+        //    }
+        //    catch { }
+        //}
+        protected new void Update()
         {
-            if (!HighLogic.LoadedSceneIsFlight) return;
-
-            //int stepcount = 1;
-            float deltatime = TimeWarp.fixedDeltaTime;
-            //float WarpRate = TimeWarp.CurrentRate;
-            //if(WarpRate > 10)
-            //{
-            //    stepcount = Mathf.CeilToInt(WarpRate / 10);
-            //    deltatime = TimeWarp.fixedDeltaTime / stepcount;
-            //}
-            
-            //for (int i = 0; i < stepcount; i++)
-            {
-                PartResource internalWater = this.part.Resources[Water];
-                PartResource internalSteam = this.part.Resources["Steam"];
-
-                PartResourceDefinition waterDef = internalWater.info;
-                PartResourceDefinition steamDef = internalSteam.info;
-
-                if(parent_Boiler != null)
-                {
-                    PartResource parent_internalWater = parent_Boiler.part.Resources[Water];
-                    PartResource parent_internalSteam = parent_Boiler.part.Resources["Steam"];
-
-                    Steam_Valve = parent_Boiler.Steam_Valve;
-                    Injector = parent_Boiler.Injector;
-
-                    double volume_AB = internalWater.maxAmount + parent_internalWater.maxAmount;
-                    double volume_rA =        internalWater.maxAmount / volume_AB;
-                    double volume_rB = parent_internalWater.maxAmount / volume_AB;
-
-                    double water_AB = internalWater.amount + parent_internalWater.amount;
-                           internalWater.amount = water_AB * volume_rA;
-                    parent_internalWater.amount = water_AB * volume_rB;
-
-                    double steam_AB = internalSteam.amount + parent_internalSteam.amount;
-                           internalSteam.amount = steam_AB * volume_rA;
-                    parent_internalSteam.amount = steam_AB * volume_rB;
-
-                    double energy_AB = ThermalEnergy + parent_Boiler.ThermalEnergy;
-                                  ThermalEnergy = (float)(energy_AB * volume_rA);
-                    parent_Boiler.ThermalEnergy = (float)(energy_AB * volume_rB);
-                }
-
-
-                if (Injector > 0f)
-                {
-                    float targetUnitsPerSecond = InjectorRate * (Injector / 100f);
-                    double unitsToPullThisFrame = targetUnitsPerSecond * deltatime;
-                    if (internalWater.amount + unitsToPullThisFrame >= internalWater.maxAmount)
-                    {
-                        unitsToPullThisFrame = internalWater.maxAmount - internalWater.amount;
-                    }
-
-                    double unitsActuallyDrained = this.part.RequestResource(waterResourceID, unitsToPullThisFrame);
-                    flowRateLabel = $"{unitsActuallyDrained / deltatime:F2} U/s";
-
-                    if (this.part.Resources.Contains(Water))
-                    {
-                        internalWater.amount += unitsActuallyDrained;
-                        ThermalEnergy += (float)unitsActuallyDrained * 0.001f * waterDef.specificHeatCapacity * 300f;// kJ = kg * tonne/kg * kJ/tonne*K * K
-                    }
-                }
-                else
-                {
-                    flowRateLabel = $"{0.0f:F2} U/s";
-                }
-                Water_Level = Mathf.Round((float)(internalWater.amount / internalWater.maxAmount) * 100f);
-
-
-                if (SystemHeatModule == null)
-                {
-                    SystemHeatModule = this.part.FindModuleImplementing<ModuleSystemHeat>();
-                    if (SystemHeatModule != null)
-                    {
-                        return;
-                    }
-                }
-                if (SteamReservoarModule == null)
-                {
-                    SteamReservoarModule = this.part.FindModuleImplementing<ModuleSteamReservoar>();
-                    if (SteamReservoarModule != null)
-                    {
-                        return;
-                    }
-                }
-
-                radiativeFlux = ThermalConductance * (Temperature - SystemHeatModule.currentLoopTemperature);
-
-                float massWaterTonnes = (float)internalWater.amount * 0.001f; //tonne = kg * tonne/kg
-                float massSteamTonnes = (float)internalSteam.amount * 0.001f;
-                float HeatCapacity = (waterDef.specificHeatCapacity * massWaterTonnes + steamDef.specificHeatCapacity * massSteamTonnes);
-                if (HeatCapacity < 0.000001f)
-                {
-                    SystemHeatModule.AddFlux(moduleID, Temperature, (radiativeFlux / deltatime), false);
-                    ThermalEnergy -= radiativeFlux;
-                    Temperature = 0;
-                }
-                else
-                {
-                    float delta_E = SteamLoop.delta_energy_exp_aproach(Temperature, HeatCapacity, SystemHeatModule.Loop, radiativeFlux, deltatime);
-
-                    SystemHeatModule.AddFlux(moduleID, Temperature, (delta_E / deltatime), false);
-                    ThermalEnergy -= delta_E;
-
-                    Temperature = ThermalEnergy / HeatCapacity;
-                }
-                Temperature_text = $"{Temperature:F1} K / {(Temperature - 273.15f):F0} °C";
-
-                float volume = (float)internalWater.maxAmount * 0.001f; // m^3 = Unit * m^3/Liter
-
-                float V_Water = (float)internalWater.amount * 0.001f; // m^3 = Unit * m^3/Liter
-                float V_Steam = Mathf.Max(volume - V_Water, 0.01f);
-
-                float Pressure_Ideal = SaturationVaporPressureCurve(Temperature);
-
-                float Mass_Steam_Ideal = (Pressure_Ideal * V_Steam) / (Gass_Constant * Temperature); // PV=mRT --> m=PV/RT   kPa * m^3 = tonne * kJ/tonne*K * K
-                float Units_Steam_Ideal = Mass_Steam_Ideal * 1000f; // Unit = tonn * kg/tonne
-
-                float delta_units = (Units_Steam_Ideal - (float)internalSteam.amount) * (1 - Mathf.Pow(1.5f, -deltatime));
-
-                delta_units = Mathf.Clamp(delta_units, -(float)internalSteam.amount, Mathf.Min((float)internalWater.amount, (ThermalEnergy / Convertion_energy)));
-
-                ThermalEnergy -= Convertion_energy * delta_units;
-                internalWater.amount -= delta_units;
-                internalSteam.amount += delta_units;
-
-
-                //Pressure = ((float)internalSteam.amount * Gass_Constant * Temperature) / (V_Steam * 1000); // PV=mRT --> P=mRT/V  kPa = kg * kJ/tonne*K * K / m^3 * 1000Pa/kPa
-                if (SteamReservoarModule != null)
-                {
-                    HeatCapacity = (waterDef.specificHeatCapacity * massWaterTonnes + steamDef.specificHeatCapacity * massSteamTonnes);
-                    if (HeatCapacity >= 0.000001f) Temperature = ThermalEnergy / HeatCapacity;
-                    volume = (float)internalWater.maxAmount * 0.001f;
-
-                    V_Water = (float)internalWater.amount * 0.001f;
-                    V_Steam = Mathf.Max(volume - V_Water, 0.01f);
-                    SteamReservoarModule.volume = V_Steam * 1000;
-                    SteamReservoarModule.ThermalEnergy = Temperature * (steamDef.specificHeatCapacity * massSteamTonnes);
-                }
-
-            }
-        }
-        protected void Update()
-        {
-            if(HighLogic.LoadedSceneIsEditor)
+            base.Update();
+            if (HighLogic.LoadedSceneIsEditor)
             {
                 parent_Boiler = this.part.parent.FindModuleImplementing<ModuleBoiler>();
-            }
-            if (SteamReservoarModule == null)
-            {
-                SteamReservoarModule = this.part.FindModuleImplementing<ModuleSteamReservoar>();
-                if (SteamReservoarModule != null)
+                if (parent_Boiler != null)
                 {
-                    return;
+                    while (true)
+                    {
+                        ModuleBoiler potential_parent_Boiler = parent_Boiler.part.parent.FindModuleImplementing<ModuleBoiler>();
+                        if (potential_parent_Boiler != null) parent_Boiler = potential_parent_Boiler;
+                        else break;
+                    }
                 }
             }
-            if (SteamReservoarModule != null)
+            if(SteamReservoirModule != null)
             {
-                SteamReservoarModule.Steam_Valve = Steam_Valve;
+                SteamReservoirModule.Steam_Valve = Throttle;
 
-                BaseField field = SteamReservoarModule.Fields["Steam_Valve"];
+                BaseField field = SteamReservoirModule.Fields["Steam_Valve"];
 
                 if (field != null)
                 {

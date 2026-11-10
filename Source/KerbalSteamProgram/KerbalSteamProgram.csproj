@@ -33,8 +33,16 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Steam Program\GameData\000_Harmony\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>..\..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program\KSP_x64_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="DynamicBatteryStorage">
+      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Steam Program\GameData\DynamicBatteryStorage\Plugins\DynamicBatteryStorage.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="System" />
@@ -69,6 +77,10 @@
       <HintPath>..\..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Steam Program\KSP_x64_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program\KSP_x64_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>..\..\..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program\KSP_x64_Data\Managed\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
@@ -85,8 +97,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ArrayUtils.cs" />
-    <Compile Include="Dynamo.cs" />
-    <Compile Include="SafetyValve.cs" />
+    <Compile Include="ModuleDynamo.cs" />
+    <Compile Include="ModuleSteamRocketEngine.cs" />
+    <Compile Include="ModuleSafetyValve.cs" />
     <Compile Include="SystemSteamEditor.cs" />
     <Compile Include="SteamLoop.cs" />
     <Compile Include="ModuleSteamReservoar.cs" />
@@ -96,7 +109,7 @@
     <Compile Include="SystemSteamSettings.cs" />
     <Compile Include="SystemSteamSimulator.cs" />
     <Compile Include="SystemSteamVessel.cs" />
-    <Compile Include="FireBox.cs" />
+    <Compile Include="ModuleFireBox.cs" />
     <Compile Include="UI\SystemSteamUI.cs" />
     <Compile Include="UI\SystemSteamAssets.cs" />
     <Compile Include="UI\ToolbarUI\ToolbarIconTag.cs" />

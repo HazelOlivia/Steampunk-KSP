@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 using KerbalSteamProgram.UI;
+using SystemHeat;
 
 namespace KerbalSteamProgram
 {
@@ -43,18 +45,18 @@ namespace KerbalSteamProgram
         public void Reset(List<Part> parts)
         {
             SteamLoops = new List<SteamLoop>();
-            List<ModuleSteamReservoar> SteamModules = new List<ModuleSteamReservoar>();
+            List<ModuleSteamReservoir> SteamModules = new List<ModuleSteamReservoir>();
 
             for (int i = parts.Count - 1; i >= 0; --i)
             {
                 Part part = parts[i];
-                SteamModules.AddRange(part.GetComponents<ModuleSteamReservoar>().ToList());
+                SteamModules.AddRange(part.GetComponents<ModuleSteamReservoir>().ToList());
             }
 
-            Utils.Log(String.Format("[SystemSteamSimulator]: Building Steam loops from {0} ModuleSteamReservoar modules", SteamModules.Count.ToString()), LogType.Simulator);
+            Utils.Log(String.Format("[SystemSteamSimulator]: Building Steam loops from {0} ModuleSteamReservoir modules", SteamModules.Count.ToString()), LogType.Simulator);
 
 
-            foreach (ModuleSteamReservoar SteamModule in SteamModules)
+            foreach (ModuleSteamReservoir SteamModule in SteamModules)
             {
                 AddSteamModule(SteamModule);
             }
@@ -67,9 +69,23 @@ namespace KerbalSteamProgram
         {
             if (SteamLoops != null)
             {
-                foreach (SteamLoop loop in SteamLoops)
+                int numSteps = CalculateStepCount(TimeWarp.fixedDeltaTime);
+                float timeStep = TimeWarp.fixedDeltaTime / (float)numSteps;
+
+                for (int i = 0; i < numSteps; i++)
                 {
-                    loop.Simulate(TimeWarp.fixedDeltaTime);
+                    foreach (SteamLoop loop in SteamLoops)
+                    {
+                        loop.SimulateIteration(timeStep);
+                    }
+                    foreach (SteamLoop loop in SteamLoops)
+                    {
+                        foreach (ModuleSteamReservoir steam_res in loop.LoopModules)
+                        {
+                            steam_res.SimulateIteration1(timeStep); //Reservoir update
+                            steam_res.SimulateIteration2(timeStep, numSteps); //other update (engine(rocket), engine(piston), etc...)
+                        }
+                    }
                 }
             }
         }
@@ -82,22 +98,30 @@ namespace KerbalSteamProgram
 
             if (SteamLoops != null)
             {
-                if (SimulationBody != null)
-                {
-                    //atmoSim.SimulateAtmosphere(SimulationBody, SimulationSpeed, SimulationAltitude);
-                }
                 foreach (SteamLoop loop in SteamLoops)
                 {
-                    loop.Simulate(SystemSteamSettings.SimulationRateEditor);
+                    loop.SimulateIteration(SystemSteamSettings.SimulationRateEditor);
                 }
             }
+        }
+
+
+        public int CalculateStepCount(float fixedDeltaTime)
+        {
+            if (TimeWarp.CurrentRate >= 4) return SystemSteamSettings.MaxSteps;
+            else return SystemSteamSettings.MaxSteps / (int)(TimeWarp.CurrentRate);
+
+            //// Calculate the approximate predicted change in temp for the time step and the heat parameters
+            //float predictedDeltaTPerStep = CalculateNetFlux() * 1000f / (Volume * CoolantType.Density * CoolantType.HeatCapacity) * fixedDeltaTime;
+
+                //return Mathf.Clamp((int)(predictedDeltaTPerStep / SystemSteamSettings.MaxDeltaTPerStep), SystemSteamSettings.MinSteps, SystemSteamSettings.MaxSteps);
         }
 
         /// <summary>
         /// Add a Steam module to the simulation
         /// </summary>
         /// <param name="module">the module to add</param>
-        public void AddSteamModule(ModuleSteamReservoar module)
+        public void AddSteamModule(ModuleSteamReservoir module)
         {
             if (module.moduleUsed)
                 AddSteamModuleToLoop(module.currentLoopID, module);
@@ -108,7 +132,7 @@ namespace KerbalSteamProgram
         /// </summary>
         /// <param name="loopID">the loop to add to</param>
         /// <param name="module">the module to add</param>
-        public void AddSteamModuleToLoop(int loopID, ModuleSteamReservoar module)
+        public void AddSteamModuleToLoop(int loopID, ModuleSteamReservoir module)
         {
             if (module.moduleUsed)
             {
@@ -138,8 +162,8 @@ namespace KerbalSteamProgram
         /// <param name="part">the part to remove</param>
         public void RemovePart(Part part)
         {
-            ModuleSteamReservoar[] SteamModules = part.GetComponents<ModuleSteamReservoar>();
-            foreach (ModuleSteamReservoar module in SteamModules)
+            ModuleSteamReservoir[] SteamModules = part.GetComponents<ModuleSteamReservoir>();
+            foreach (ModuleSteamReservoir module in SteamModules)
             {
                 RemoveSteamModule(module);
             }
@@ -149,7 +173,7 @@ namespace KerbalSteamProgram
         /// Remove a Steam module from the system
         /// </summary>
         /// <param name="module">the module to remove</param>
-        public void RemoveSteamModule(ModuleSteamReservoar module)
+        public void RemoveSteamModule(ModuleSteamReservoir module)
         {
             RemoveSteamModuleFromLoop(module.currentLoopID, module);
         }
@@ -159,7 +183,7 @@ namespace KerbalSteamProgram
         /// </summary>
         /// <param name="loopID">the loop to remove from</param>
         /// <param name="module">the module to remove</param>
-        public void RemoveSteamModuleFromLoop(int loopID, ModuleSteamReservoar module)
+        public void RemoveSteamModuleFromLoop(int loopID, ModuleSteamReservoir module)
         {
             if (HasLoop(loopID))
             {

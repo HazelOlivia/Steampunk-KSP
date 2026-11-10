@@ -47,12 +47,12 @@ namespace KerbalSteamProgram
         public float ConvectionFlux { get; private set; }
         public float ConvectionTemperature { get; private set; }
 
-        public List<ModuleSteamReservoar> LoopModules
+        public List<ModuleSteamReservoir> LoopModules
         {
             get { return modules; }
         }
 
-        protected List<ModuleSteamReservoar> modules;
+        protected List<ModuleSteamReservoir> modules;
         protected SystemSteamSimulator simulator;
         /// <summary>
         /// Build a new SteamLoop
@@ -61,7 +61,7 @@ namespace KerbalSteamProgram
         public SteamLoop(int id)
         {
             ID = id;
-            modules = new List<ModuleSteamReservoar>();
+            modules = new List<ModuleSteamReservoir>();
         }
         /// <summary>
         /// Build a new SteamLoop
@@ -71,7 +71,7 @@ namespace KerbalSteamProgram
         public SteamLoop(SystemSteamSimulator sim, int id)
         {
             ID = id;
-            modules = new List<ModuleSteamReservoar>();
+            modules = new List<ModuleSteamReservoir>();
             Temperature = GetEnvironmentTemperature();
             simulator = sim;
         }
@@ -80,10 +80,10 @@ namespace KerbalSteamProgram
         /// </summary>
         /// <param name="id">the loop ID</param>
         /// <param name="SteamModules">the modules to add</param>
-        public SteamLoop(int id, List<ModuleSteamReservoar> SteamModules)
+        public SteamLoop(int id, List<ModuleSteamReservoir> SteamModules)
         {
             ID = id;
-            modules = new List<ModuleSteamReservoar>();
+            modules = new List<ModuleSteamReservoir>();
             modules = SteamModules;
             //Temperature = SteamModules.Average(x => x.LoopTemperature);
             // Get loop properties set up
@@ -93,37 +93,27 @@ namespace KerbalSteamProgram
         const float Gass_Constant = 461.5f; // kJ/tonne*K   0.4615 kJ/kg*K
 
         /// <summary>
-        /// Add a ModuleSteamReservoar to this loop. Adding means adding Volume and recalculating the nominal temperature
+        /// Add a ModuleSteamReservoir to this loop. Adding means adding Volume and recalculating the nominal temperature
         /// </summary>
         /// <param name="SteamModule">the module to add</param>
-        public void AddSteamModule(ModuleSteamReservoar SteamModule)
+        public void AddSteamModule(ModuleSteamReservoir SteamModule)
         {
             Volume += SteamModule.volume;
             modules.Add(SteamModule);
-            modules.Sort(CompareModuleSteamReservoarPriority);
+            modules.Sort(CompareModuleSteamReservoirPriority);
         }
 
         /// <summary>
-        /// Remove a ModuleSteamReservoar to this loop. Removing means removing Volume and recalculating the nominal temperature
+        /// Remove a ModuleSteamReservoir to this loop. Removing means removing Volume and recalculating the nominal temperature
         /// </summary>
         /// <param name="SteamModule">the module to remove</param>
-        public void RemoveSteamModule(ModuleSteamReservoar SteamModule)
+        public void RemoveSteamModule(ModuleSteamReservoir SteamModule)
         {
             Volume -= SteamModule.volume;
             modules.Remove(SteamModule);
         }
 
-        /// <summary>
-        /// Simulate this loop given a time warp level. First breaks the time step down if needed,
-        /// then proceeds to iterate over all  time steps
-        /// </summary>
-        /// <param name="fixedDeltaTime">the current fixed delta time</param>
-        public void Simulate(float fixedDeltaTime)
-        {
-            SimulateIteration(fixedDeltaTime);
-        }
-
-        void SimulateIteration(float simTimeStep)
+        public void SimulateIteration(float simTimeStep)
         {
             float specificHeatCapacity = modules[0].part.Resources["Steam"].info.specificHeatCapacity; // kJ/tonne*K
             for (int i0 = 0; i0 < modules.Count - 1; i0++)
@@ -138,12 +128,14 @@ namespace KerbalSteamProgram
                         {
                             float Area_relative = Mathf.Sqrt(Area_relative_0 * Area_relative_1);
 
-                            float m0 = (float)modules[i0].part.Resources["Steam"].amount;
+                            PartResource resource0 = modules[i0].part.Resources["Steam"];
+                            float m0 = (float)resource0.amount + modules[i0].Mass_Air;
                             float v0 = modules[i0].volume;
                             float t0 = modules[i0].Temperature;
                             Vector3 pos0 = modules[i0].part.orgPos;
 
-                            float m1 = (float)modules[i1].part.Resources["Steam"].amount;
+                            PartResource resource1 = modules[i1].part.Resources["Steam"];
+                            float m1 = (float)resource1.amount + modules[i1].Mass_Air;
                             float v1 = modules[i1].volume;
                             float t1 = modules[i1].Temperature;
                             Vector3 pos1 = modules[i1].part.orgPos;
@@ -156,23 +148,31 @@ namespace KerbalSteamProgram
                                 float density = m0 / v0;
                                 //float t0_mass_flow_rate = 0.6f * Area_relative * Mathf.Sqrt(2 * density * delta_P); //orifice flow equation (also known as the differential pressure flow equation)
                                 float dynamic_viscocity = Sutherlands_Law_Steam(t0);
-                                float t0_mass_flow_rate = SwameeJain(1, Area_relative, density, delta_P, distance, Mathf.Sqrt(Area_relative/Mathf.PI), dynamic_viscocity);
+                                float t0_mass_flow_rate = SwameeJain(1, Area_relative, density, delta_P, distance, 2 * Mathf.Sqrt(Area_relative/Mathf.PI), dynamic_viscocity);
                                 float delta_mass = delta_mass_exp_aproach(m0, v0, t0, m1, v1, t1, t0_mass_flow_rate, simTimeStep);
+                                delta_mass = t0_mass_flow_rate * simTimeStep;
+                                float steam_ratio = (float)resource0.amount / m0;
+                                float delta_mass_steam = delta_mass * steam_ratio;
+                                float delta_mass_air = delta_mass * (1 - steam_ratio);
                                 float delta_Energy = t0 * specificHeatCapacity * delta_mass * 0.001f; // kJ = K * kJ/tonne*K * kg * tonne/kg
 
-                                modules[i1].AddFlux((delta_mass, delta_Energy)); // (kg, kJ)
-                                modules[i0].AddFlux((-delta_mass, -delta_Energy));
+                                modules[i1].AddFlux((delta_mass_steam, delta_mass_air, delta_Energy)); // (kg, kJ)
+                                modules[i0].AddFlux((-delta_mass_steam, -delta_mass_air, -delta_Energy));
                             }
                             else if (delta_P < 0) // flow i1 --> i0
                             {
                                 float density = m1 / v1;
                                 float dynamic_viscocity = Sutherlands_Law_Steam(t1);
-                                float t0_mass_flow_rate = SwameeJain(1, Area_relative, density, delta_P, distance, Mathf.Sqrt(Area_relative / Mathf.PI), dynamic_viscocity);
+                                float t0_mass_flow_rate = SwameeJain(1, Area_relative, density, delta_P, distance, 2 * Mathf.Sqrt(Area_relative / Mathf.PI), dynamic_viscocity);
                                 float delta_mass = delta_mass_exp_aproach(m1, v1, t1, m0, v0, t0, t0_mass_flow_rate, simTimeStep);
+                                delta_mass = t0_mass_flow_rate * simTimeStep;
+                                float steam_ratio = (float)resource1.amount / m1;
+                                float delta_mass_steam = delta_mass * steam_ratio;
+                                float delta_mass_air = delta_mass * (1 - steam_ratio);
                                 float delta_Energy = t1 * specificHeatCapacity * delta_mass * 0.001f;
 
-                                modules[i0].AddFlux((delta_mass, delta_Energy));
-                                modules[i1].AddFlux((-delta_mass, -delta_Energy));
+                                modules[i0].AddFlux((delta_mass_steam, delta_mass_air, delta_Energy));
+                                modules[i1].AddFlux((-delta_mass_steam, -delta_mass_air, -delta_Energy));
                             }
                         }
                     }
@@ -196,10 +196,15 @@ namespace KerbalSteamProgram
             float epsilon = 0.000045f;
             float abs_delta_P = Mathf.Abs(delta_P);
             float root_result = Mathf.Sqrt(density * D * abs_delta_P * 2 / L);
-            if (root_result <= 1e-7f) return 0;
             float logterm = Mathf.Log10(epsilon / (3.7f * D) + (1.78f * mu) / (D * root_result));
-            float mass_flow_rate = n * density * A * Mathf.Clamp(-2.22f * root_result * logterm, 0, 480) * Mathf.Sign(delta_P);
+            float mass_flow_rate = n * density * A * Mathf.Clamp(-2.22f * root_result * logterm, 0, 480);
             if (float.IsNaN(mass_flow_rate)) return 0;
+            return mass_flow_rate;
+        }
+
+        public static float Venturi_orifice_flow(float A, float density, float delta_P)
+        {
+            float mass_flow_rate = 0.98f * A * Mathf.Sqrt(Mathf.Abs(2 * density * delta_P));
             return mass_flow_rate;
         }
 
@@ -218,10 +223,23 @@ namespace KerbalSteamProgram
             if (float.IsNaN(delta_m)) return 0;
             return -delta_m;
         }
-        public static float delta_mass_exp_aproach(float m1, float v1, float t1, float t0_mass_flow_rate, float simTimeStep)
+        public static float delta_mass_exp_aproach(float m1, float v1, float t1, float p_atmos, float t0_mass_flow_rate, float simTimeStep)
         {
             if (t0_mass_flow_rate == 0) return 0;
-            float target_m1 = (100000f * v1) / (Gass_Constant * t1);
+            float target_m1 = (p_atmos * v1) / (Gass_Constant * t1);
+            float max_delta_m = target_m1 - m1;
+
+            if (Mathf.Abs(max_delta_m) < 1e-7f) return 0;
+
+            float k = Mathf.Abs(t0_mass_flow_rate / max_delta_m);
+            float delta_m = max_delta_m * (1 - Mathf.Exp(-k * simTimeStep));
+            if (float.IsNaN(delta_m)) return 0;
+            return -delta_m;
+        }
+        public static float delta_mass_exp_aproach(float m1, float v1, float t1, float p_atmos, float t0_mass_flow_rate, float simTimeStep, float Gass_Constant)
+        {
+            if (t0_mass_flow_rate == 0) return 0;
+            float target_m1 = (p_atmos * v1) / (Gass_Constant * t1);
             float max_delta_m = target_m1 - m1;
 
             if (Mathf.Abs(max_delta_m) < 1e-7f) return 0;
@@ -239,6 +257,7 @@ namespace KerbalSteamProgram
             //c = SpecificHeatCapacity kJ/(kg*K)
             //b = (beta) ReciprocalHeatCapacity K/kJ
             // System Heat is wrong about CoolantType.HeatCapacity it is actually SpecificHeatCapacity // HeatLoop.cs Line 169 proves it
+
             float C2 = (heatLoop.Volume * heatLoop.CoolantType.Density * heatLoop.CoolantType.HeatCapacity); // m^3 * (kg/m^3) *(kJ/(kg*K))
             float t2 = heatLoop.Temperature;
 
@@ -255,7 +274,7 @@ namespace KerbalSteamProgram
             return delta_m;
         }
 
-        static int CompareModuleSteamReservoarPriority(ModuleSteamReservoar a, ModuleSteamReservoar b)
+        static int CompareModuleSteamReservoirPriority(ModuleSteamReservoir a, ModuleSteamReservoir b)
         {
             return b.priority - a.priority;
         }
